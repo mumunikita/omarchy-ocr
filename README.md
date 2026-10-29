@@ -41,11 +41,12 @@ cd omarchy-ocr
 Установщик:
 
 1. Проверит и поставит системные зависимости.
-2. Создаст venv `~/.local/share/pix2text-venv` и поставит Pix2Text, EasyOCR и CPU-сборку torch.
-3. Скачает модели (~450 МБ) в `~/.pix2text` и `~/.EasyOCR`.
-4. Скопирует скрипты в `~/.local/share/omarchy-ocr` и `~/.local/bin`.
-5. Спросит хоткей и запишет его в конфиг Hyprland.
-6. Спросит режим работы демона и включит нужные systemd-юниты.
+2. Спросит режим работы демона (Obsidian / всегда).
+3. Создаст venv `~/.local/share/pix2text-venv` и поставит Pix2Text, EasyOCR и CPU-сборку torch.
+4. Скачает модели (~450 МБ) в `~/.pix2text` и `~/.EasyOCR`.
+5. Скопирует скрипты в `~/.local/share/omarchy-ocr` и `~/.local/bin`.
+6. Спросит хоткей и запишет его в конфиг Hyprland.
+7. Включит нужные systemd-юниты.
 
 Первый запуск занимает несколько минут: качаются пакеты и модели.
 
