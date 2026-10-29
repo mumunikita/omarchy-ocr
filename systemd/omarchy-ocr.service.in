@@ -1,0 +1,16 @@
+[Unit]
+Description=Omarchy OCR daemon (EasyOCR text + Pix2Text formulas)
+
+[Service]
+Type=simple
+ExecStart=@HOME@/.local/share/pix2text-venv/bin/python @HOME@/.local/share/omarchy-ocr/daemon.py
+Environment=OMP_NUM_THREADS=@THREADS@
+Environment=MKL_NUM_THREADS=@THREADS@
+Environment=OMARCHY_OCR_IDLE=@IDLE@
+Environment=OMARCHY_OCR_LANGS=ru,en
+Nice=5
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target

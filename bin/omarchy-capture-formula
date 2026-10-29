@@ -1,0 +1,109 @@
+#!/bin/bash
+# Capture a screen region and copy text + math formulas as Markdown/LaTeX.
+# Part of omarchy-ocr: https://github.com/mumunikita/omarchy-ocr
+
+set -uo pipefail
+
+APP_DIR="$HOME/.local/share/omarchy-ocr"
+VENV_PY="$HOME/.local/share/pix2text-venv/bin/python"
+OCR_PY="$APP_DIR/pix2text_ocr.py"
+SOCK="${XDG_RUNTIME_DIR:-/tmp}/omarchy-ocr.sock"
+MODE_FILE="$HOME/.config/omarchy-ocr/mode"
+
+TMP_IMG=$(mktemp --suffix=.png)
+
+cleanup() {
+  [[ -n ${PICKER_PID:-} ]] && kill "$PICKER_PID" 2>/dev/null
+  rm -f "$TMP_IMG"
+}
+trap cleanup EXIT
+
+# Omarchy ships a wrapper with glyph support; plain Hyprland falls back to
+# notify-send so the script still works outside Omarchy.
+if command -v omarchy-notification-send >/dev/null 2>&1; then
+  NOTIFY=(omarchy-notification-send -g 󰑊)
+else
+  NOTIFY=(notify-send -i accessories-character-map)
+fi
+
+notify() {
+  "${NOTIFY[@]}" "$@" 2>/dev/null || true
+}
+
+obsidian_running() {
+  hyprctl clients -j 2>/dev/null \
+    | jq -e 'any(.[]; (.class | ascii_downcase | contains("obsidian")))' \
+      >/dev/null 2>&1
+}
+
+# Freeze the screen so the capture matches what was on screen while selecting.
+hyprpicker -r -z >/dev/null 2>&1 &
+PICKER_PID=$!
+sleep .1
+SELECTION=$(slurp 2>/dev/null)
+
+[[ -z $SELECTION ]] && exit 0
+
+grim -g "$SELECTION" "$TMP_IMG" || exit 1
+
+# Release the frozen screen immediately; recognition happens in the background.
+kill "$PICKER_PID" 2>/dev/null
+PICKER_PID=
+
+MODE=obsidian
+[[ -r $MODE_FILE ]] && MODE=$(<"$MODE_FILE")
+
+# The daemon normally lives only while Obsidian is open (see
+# omarchy-ocr-obsidian.service). Start it here too in case the watcher missed
+# the window. In "always" mode it may have exited after an idle hour, so the
+# hotkey brings it back.
+DAEMON_UP=0
+if systemctl --user -q is-active omarchy-ocr.service 2>/dev/null; then
+  DAEMON_UP=1
+elif [[ $MODE == always ]] || obsidian_running; then
+  systemctl --user start --no-block omarchy-ocr.service 2>/dev/null || true
+  DAEMON_UP=1
+fi
+
+NOTIF_ID=$(notify -t 0 -p "Распознаю текст и формулы…")
+
+notify_replace() {
+  if [[ -n $NOTIF_ID ]]; then
+    notify -r "$NOTIF_ID" "$@"
+  else
+    notify "$@"
+  fi
+}
+
+# Retry until the daemon answers (cold start loads the models, ~10 s). A stale
+# socket file from a killed daemon is simply retried until it is replaced.
+RESP=""
+if (( DAEMON_UP )); then
+  for _ in $(seq 1 200); do
+    if [[ -S $SOCK ]]; then
+      RESP=$(printf '%s\n' "$TMP_IMG" | socat -t 180 - UNIX-CONNECT:"$SOCK" 2>/dev/null)
+      [[ -n $RESP ]] && break
+    fi
+    sleep 0.1
+  done
+fi
+
+STATUS=${RESP%%$'\n'*}
+OUT=""
+if [[ $STATUS == OK ]]; then
+  OUT=${RESP#*$'\n'}
+fi
+
+# Safety net: daemon unavailable or failed -> one-shot Pix2Text pipeline.
+if [[ $STATUS != OK ]]; then
+  OUT=$("$VENV_PY" "$OCR_PY" "$TMP_IMG" 2>/dev/null) || OUT=""
+fi
+
+if [[ -z $OUT ]]; then
+  notify_replace -u critical "Не удалось распознать" "Попробуй выделить область ещё раз"
+  exit 1
+fi
+
+printf "%s" "$OUT" | wl-copy
+
+notify_replace "Текст и формулы в буфере" "Markdown с LaTeX готов к вставке"
