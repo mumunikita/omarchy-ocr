@@ -8,7 +8,8 @@ APP_DIR="$HOME/.local/share/omarchy-ocr"
 VENV_PY="$HOME/.local/share/pix2text-venv/bin/python"
 OCR_PY="$APP_DIR/pix2text_ocr.py"
 SOCK="${XDG_RUNTIME_DIR:-/tmp}/omarchy-ocr.sock"
-MODE_FILE="$HOME/.config/omarchy-ocr/mode"
+
+source "$APP_DIR/common.sh"
 
 TMP_IMG=$(mktemp --suffix=.png)
 
@@ -50,17 +51,23 @@ grim -g "$SELECTION" "$TMP_IMG" || exit 1
 kill "$PICKER_PID" 2>/dev/null
 PICKER_PID=
 
-MODE=obsidian
-[[ -r $MODE_FILE ]] && MODE=$(<"$MODE_FILE")
+should_start_daemon() {
+  case $(ocr_mode) in
+    always) return 0 ;;
+    schedule) ocr_within_window ;;
+    obsidian) obsidian_running && ocr_within_window ;;
+    *) return 1 ;;
+  esac
+}
 
-# The daemon normally lives only while Obsidian is open (see
-# omarchy-ocr-obsidian.service). Start it here too in case the watcher missed
-# the window. In "always" mode it may have exited after an idle hour, so the
-# hotkey brings it back.
+# The daemon normally lives only while Obsidian is open or inside the
+# configured schedule (see omarchy-ocr-obsidian.service). Start it here too in
+# case the watcher missed the window. In "always" mode it may have exited after
+# an idle hour, so the hotkey brings it back.
 DAEMON_UP=0
 if systemctl --user -q is-active omarchy-ocr.service 2>/dev/null; then
   DAEMON_UP=1
-elif [[ $MODE == always ]] || obsidian_running; then
+elif should_start_daemon; then
   systemctl --user start --no-block omarchy-ocr.service 2>/dev/null || true
   DAEMON_UP=1
 fi

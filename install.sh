@@ -20,6 +20,8 @@ CONF_DIR="$HOME/.config/omarchy-ocr"
 
 HOTKEY=""
 MODE=""
+SCHEDULE=""
+DAYS=""
 SKIP_DEPS=0
 SKIP_MODELS=0
 ASSUME_YES=0
@@ -43,6 +45,8 @@ omarchy-ocr installer
 Опции:
   --hotkey "SUPER + ALT + O"   хоткей без интерактивного выбора
   --obsidian                   демон работает только при открытом Obsidian
+  --schedule "09:00-23:00"     демон работает по расписанию
+  --days "1-5"                 дни недели для расписания (1=Пн..7=Вс)
   --always-on                  демон запускается при входе и живёт постоянно
   --skip-deps                  не устанавливать системные пакеты
   --skip-models                не скачивать модели (они уже есть)
@@ -58,6 +62,14 @@ while (($#)); do
       HOTKEY=$2; shift 2 ;;
     --hotkey=*)   HOTKEY="${1#*=}"; shift ;;
     --obsidian)   MODE=obsidian; shift ;;
+    --schedule)
+      [[ -n ${2:-} ]] || die "После --schedule нужно окно, например \"09:00-23:00\"."
+      MODE=schedule; SCHEDULE=$2; shift 2 ;;
+    --days)
+      [[ -n ${2:-} ]] || die "После --days нужны дни, например \"1-5\"."
+      DAYS=$2
+      [[ -z $MODE ]] && MODE=schedule
+      shift 2 ;;
     --always-on)  MODE=always; shift ;;
     --skip-deps)  SKIP_DEPS=1; shift ;;
     --skip-models) SKIP_MODELS=1; shift ;;
@@ -73,6 +85,14 @@ done
 
 command -v hyprctl >/dev/null 2>&1 || die "hyprctl не найден. Нужен Hyprland."
 systemctl --user show-environment >/dev/null 2>&1 || die "Нет пользовательской сессии systemd."
+
+# shellcheck source=lib/common.sh
+source "$SRC_DIR/lib/common.sh"
+
+[[ -z $SCHEDULE ]] || ocr_valid_schedule "$SCHEDULE" \
+  || die "Неверное время: $SCHEDULE (нужно HH:MM-HH:MM)"
+[[ -z $DAYS ]] || ocr_valid_days "$DAYS" \
+  || die "Неверные дни: $DAYS (например 1-5 или 1,3,5)"
 
 # --- 1. dependencies ---------------------------------------------------------
 
@@ -154,6 +174,7 @@ install_files() {
   install -m755 "$SRC_DIR/lib/obsidian_watch.sh" "$APP_DIR/obsidian_watch.sh"
   install -m644 "$SRC_DIR/lib/daemon.py" "$APP_DIR/daemon.py"
   install -m755 "$SRC_DIR/lib/pix2text_ocr.py" "$APP_DIR/pix2text_ocr.py"
+  install -m644 "$SRC_DIR/lib/common.sh" "$APP_DIR/common.sh"
   install -m644 "$SRC_DIR/README.md" "$APP_DIR/README.md"
 
   local threads idle
@@ -161,10 +182,10 @@ install_files() {
   if (( threads < 1 )); then threads=1; fi
   if (( threads > 8 )); then threads=8; fi
 
-  if [[ $MODE == obsidian ]]; then
-    idle=0
-  else
+  if [[ $MODE == always ]]; then
     idle=3600
+  else
+    idle=0
   fi
 
   sed -e "s|@HOME@|$HOME|g" -e "s|@THREADS@|$threads|g" -e "s|@IDLE@|$idle|g" \
@@ -173,6 +194,13 @@ install_files() {
     "$SRC_DIR/systemd/omarchy-ocr-obsidian.service.in" > "$UNIT_DIR/omarchy-ocr-obsidian.service"
 
   printf '%s\n' "$MODE" > "$CONF_DIR/mode"
+  if [[ $MODE == schedule ]]; then
+    printf '%s\n' "$SCHEDULE" > "$CONF_DIR/schedule"
+    printf '%s\n' "$DAYS" > "$CONF_DIR/days"
+  else
+    : > "$CONF_DIR/schedule"
+    : > "$CONF_DIR/days"
+  fi
   ok "скрипты и systemd-юниты установлены"
 }
 
@@ -340,8 +368,11 @@ choose_mode() {
     return
   fi
 
-  local default=always
-  command -v obsidian >/dev/null 2>&1 && default=obsidian
+  local default=always default_choice=3
+  if command -v obsidian >/dev/null 2>&1; then
+    default=obsidian
+    default_choice=1
+  fi
 
   if (( ASSUME_YES )) || [[ ! -t 0 ]]; then
     printf '%s\n' "$default"
@@ -352,30 +383,62 @@ choose_mode() {
 
 Демон OCR занимает ~1.4 ГБ RAM. Когда его держать запущенным?
   1) Только при открытом Obsidian (экономит память)
-  2) Всегда (автозапуск при входе, выход после часа простоя)
+  2) По расписанию (например, 09:00-23:00)
+  3) Всегда (автозапуск при входе, выход после часа простоя)
 EOF
   local choice
-  read -r -p "Номер [1]: " choice </dev/tty
-  case ${choice:-1} in
-    2) printf '%s\n' always ;;
-    *) printf '%s\n' obsidian ;;
-  esac
+  while true; do
+    read -r -p "Номер [$default_choice]: " choice </dev/tty
+    case ${choice:-$default_choice} in
+      1) printf '%s\n' obsidian; return ;;
+      2) printf '%s\n' schedule; return ;;
+      3) printf '%s\n' always; return ;;
+      *) warn "Введи 1–3." ;;
+    esac
+  done
+}
+
+choose_schedule() {
+  if [[ -z $SCHEDULE ]]; then
+    if (( ASSUME_YES )) || [[ ! -t 0 ]]; then
+      SCHEDULE="09:00-23:00"
+    else
+      read -r -p "Время работы [09:00-23:00]: " SCHEDULE </dev/tty
+      SCHEDULE=${SCHEDULE:-09:00-23:00}
+    fi
+  fi
+
+  if [[ -z $DAYS ]]; then
+    if (( ASSUME_YES )) || [[ ! -t 0 ]]; then
+      DAYS="1-7"
+    else
+      read -r -p "Дни недели, 1=Пн..7=Вс [1-7]: " DAYS </dev/tty
+      DAYS=${DAYS:-1-7}
+    fi
+  fi
+
+  ocr_valid_schedule "$SCHEDULE" || die "Неверное время: $SCHEDULE (нужно HH:MM-HH:MM)"
+  ocr_valid_days "$DAYS" || die "Неверные дни: $DAYS (например 1-5 или 1,3,5)"
 }
 
 enable_services() {
   systemctl --user daemon-reload
 
-  if [[ $MODE == obsidian ]]; then
+  if [[ $MODE == always ]]; then
+    systemctl --user disable --now omarchy-ocr-obsidian.service >/dev/null 2>&1 || true
+    systemctl --user enable --now omarchy-ocr.service
+    ok "демон включён в автозапуск (выход после часа простоя)"
+  else
     systemctl --user disable --now omarchy-ocr.service >/dev/null 2>&1 || true
     systemctl --user enable omarchy-ocr-obsidian.service
     # Restart, not just start: sync_windows() must run to pick up an already
     # open Obsidian window and start the daemon.
     systemctl --user restart omarchy-ocr-obsidian.service
-    ok "watcher включён: демон живёт только при открытом Obsidian"
-  else
-    systemctl --user disable --now omarchy-ocr-obsidian.service >/dev/null 2>&1 || true
-    systemctl --user enable --now omarchy-ocr.service
-    ok "демон включён в автозапуск (выход после часа простоя)"
+    if [[ $MODE == schedule ]]; then
+      ok "watcher включён: демон работает по расписанию $SCHEDULE (дни $DAYS)"
+    else
+      ok "watcher включён: демон живёт только при открытом Obsidian"
+    fi
   fi
 }
 
@@ -391,7 +454,17 @@ else
 fi
 
 MODE=$(choose_mode)
-info "Режим: $([[ $MODE == obsidian ]] && echo 'только при открытом Obsidian' || echo 'всегда')"
+if [[ $MODE == schedule ]]; then
+  choose_schedule
+fi
+
+case $MODE in
+  obsidian) MODE_LABEL="только при открытом Obsidian" ;;
+  schedule) MODE_LABEL="по расписанию $SCHEDULE, дни $DAYS" ;;
+  always)   MODE_LABEL="всегда" ;;
+esac
+
+info "Режим: $MODE_LABEL"
 
 info "Готовлю Python-окружение"
 install_python
@@ -414,11 +487,13 @@ enable_services
 sleep 1
 printf '\n%sГотово.%s\n\n' "$GREEN" "$RESET"
 printf '  Хоткей:  %s%s%s\n' "$BOLD" "$HOTKEY" "$RESET"
-printf '  Режим:   %s\n' "$([[ $MODE == obsidian ]] && echo 'только при открытом Obsidian' || echo 'всегда')"
-if [[ $MODE == obsidian ]]; then
-  printf '  Демон:   запустится при открытии Obsidian\n'
-else
+printf '  Режим:   %s\n' "$MODE_LABEL"
+if [[ $MODE == always ]]; then
   printf '  Демон:   %s\n' "$(systemctl --user is-active omarchy-ocr.service 2>/dev/null || true)"
+elif [[ $MODE == schedule ]]; then
+  printf '  Демон:   %s\n' "$(systemctl --user is-active omarchy-ocr.service 2>/dev/null || true)"
+else
+  printf '  Демон:   запустится при открытии Obsidian\n'
 fi
 printf '\n  Выдели область экрана и нажми хоткей.\n'
 printf '  Логи: %sjournalctl --user -u omarchy-ocr.service -f%s\n\n' "$DIM" "$RESET"

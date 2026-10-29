@@ -1,5 +1,5 @@
 [Unit]
-Description=Start/stop the Omarchy OCR daemon with Obsidian
+Description=Manage the Omarchy OCR daemon lifecycle (Obsidian/schedule)
 After=graphical-session.target
 
 [Service]
