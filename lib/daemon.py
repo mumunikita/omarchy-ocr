@@ -18,6 +18,7 @@ Environment:
 
 import logging
 import os
+import re
 import signal
 import socket
 import sys
@@ -49,11 +50,39 @@ SOCK_PATH = os.path.join(
     os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "omarchy-ocr.sock"
 )
 IDLE_TIMEOUT = int(os.environ.get("OMARCHY_OCR_IDLE", "3600"))
-LANGS = [
-    lang.strip()
-    for lang in os.environ.get("OMARCHY_OCR_LANGS", "ru,en").split(",")
-    if lang.strip()
-]
+
+# Accept both EasyOCR codes ("ru,en") and the Tesseract-style value used by
+# older setups ("eng+rus"), so an inherited environment cannot break OCR.
+_LANG_ALIASES = {
+    "eng": "en",
+    "rus": "ru",
+    "ukr": "uk",
+    "deu": "de",
+    "fra": "fr",
+    "spa": "es",
+    "ita": "it",
+    "por": "pt",
+    "pol": "pl",
+    "ces": "cs",
+    "tur": "tr",
+    "ara": "ar",
+    "jpn": "ja",
+    "kor": "ko",
+    "chi_sim": "ch_sim",
+    "chi_tra": "ch_tra",
+}
+
+
+def _parse_langs(value):
+    langs = []
+    for part in re.split(r"[+,]", value):
+        part = part.strip().lower()
+        if part:
+            langs.append(_LANG_ALIASES.get(part, part))
+    return langs or ["ru", "en"]
+
+
+LANGS = _parse_langs(os.environ.get("OMARCHY_OCR_LANGS", "ru,en"))
 RESIZED_SHAPE = int(os.environ.get("OMARCHY_OCR_RESIZED_SHAPE", "768"))
 # Default 0.25 lets the detector mistake Cyrillic diaeresis marks (ё) for math
 # accents. Real formulas score ~0.7+, so 0.5 keeps them and drops the noise.

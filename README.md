@@ -138,7 +138,7 @@ Watcher работает на событийном сокете Hyprland (`.sock
 
 | Переменная | По умолчанию | Назначение |
 |---|---|---|
-| `OMARCHY_OCR_LANGS` | `ru,en` | языки EasyOCR (коды через запятую) |
+| `OMARCHY_OCR_LANGS` | `ru,en` | языки EasyOCR; принимает и `ru,en`, и `eng+rus` |
 | `OMARCHY_OCR_IDLE` | `0` / `3600` | простой до выхода, секунды (`0` — никогда) |
 | `OMARCHY_OCR_RESIZED_SHAPE` | `768` | ширина, до которой масштабируется картинка |
 | `OMARCHY_OCR_MFD_CONF` | `0.5` | порог детектора формул |

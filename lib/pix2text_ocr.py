@@ -7,6 +7,7 @@ when Obsidian is closed). Slow (~15 s) because every model is loaded again.
 
 import logging
 import os
+import re
 import sys
 import warnings
 
@@ -22,11 +23,38 @@ from pix2text import Pix2Text, set_logger  # noqa: E402
 set_logger(log_level=logging.ERROR)
 logging.disable(logging.WARNING)
 
-LANGS = [
-    lang.strip()
-    for lang in os.environ.get("OMARCHY_OCR_LANGS", "ru,en").split(",")
-    if lang.strip()
-]
+# Accept both EasyOCR codes ("ru,en") and the Tesseract-style value used by
+# older setups ("eng+rus"), so an inherited environment cannot break OCR.
+_LANG_ALIASES = {
+    "eng": "en",
+    "rus": "ru",
+    "ukr": "uk",
+    "deu": "de",
+    "fra": "fr",
+    "spa": "es",
+    "ita": "it",
+    "por": "pt",
+    "pol": "pl",
+    "ces": "cs",
+    "tur": "tr",
+    "ara": "ar",
+    "jpn": "ja",
+    "kor": "ko",
+    "chi_sim": "ch_sim",
+    "chi_tra": "ch_tra",
+}
+
+
+def _parse_langs(value):
+    langs = []
+    for part in re.split(r"[+,]", value):
+        part = part.strip().lower()
+        if part:
+            langs.append(_LANG_ALIASES.get(part, part))
+    return langs or ["ru", "en"]
+
+
+LANGS = _parse_langs(os.environ.get("OMARCHY_OCR_LANGS", "ru,en"))
 RESIZED_SHAPE = int(os.environ.get("OMARCHY_OCR_RESIZED_SHAPE", "768"))
 MFD_CONF = float(os.environ.get("OMARCHY_OCR_MFD_CONF", "0.5"))
 

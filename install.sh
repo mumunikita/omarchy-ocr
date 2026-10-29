@@ -121,7 +121,7 @@ install_python() {
 
 download_models() {
   info "Скачиваю модели OCR (~450 МБ, один раз)"
-  "$VENV_DIR/bin/python" - <<'PY'
+  OMARCHY_OCR_LANGS=ru,en "$VENV_DIR/bin/python" - <<'PY'
 import logging
 import os
 
