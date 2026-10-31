@@ -1,4 +1,4 @@
-# omarchy-ocr
+# omarchy-latex-ocr
 
 Локальное распознавание **текста и математических формул** с экрана в формат Markdown + LaTeX для [Omarchy](https://omarchy.org/) / Hyprland.
 
